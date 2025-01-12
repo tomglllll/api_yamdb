@@ -1,3 +1,4 @@
+from rest_framework import viewsets, filters
 from django.core.mail import EmailMessage
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -6,9 +7,18 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from reviews.models import User
-from .serializers import (GetTokenSerializer, NotAdminSerializer,
-                          SignUpSerializer, UsersSerializer)
+from reviews.models import Category, Genre, Title, User
+from .serializers import (
+    CategorySerializer,
+    GenreSerializer,
+    TitleGetSerializer,
+    TitleCreateUpdateSerializer,
+    GetTokenSerializer,
+    NotAdminSerializer,
+    SignUpSerializer,
+    UsersSerializer
+)
+from .permissions import IsAdminUserOrReadOnly
 
 
 class UsersViewSet(viewsets.ModelViewSet):
@@ -90,3 +100,33 @@ class APISignup(APIView):
         }
         self.send_email(data)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+    permission_classes = (IsAdminUserOrReadOnly, )
+    lookup_field = 'slug'
+    filter_backends = (filters.SearchFilter,)
+    search_fields = ('name',)
+
+
+class GenreViewSet(viewsets.ModelViewSet):
+    queryset = Genre.objects.all()
+    serializer_class = GenreSerializer
+    permission_classes = (IsAdminUserOrReadOnly, )
+    lookup_field = 'slug'
+    filter_backends = (filters.SearchFilter,)
+    search_fields = ['name']
+
+
+class TitleViewSet(viewsets.ModelViewSet):
+    queryset = Title.objects.all()
+    permission_classes = (IsAdminUserOrReadOnly, )
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'year']
+
+    def get_serializer_class(self):
+        if self.action in ('list', 'retrieve'):
+            return TitleGetSerializer
+        return TitleCreateUpdateSerializer

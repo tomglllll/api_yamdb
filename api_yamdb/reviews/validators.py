@@ -12,14 +12,14 @@ def validate_username(value):
         )
     if re.search(r'^[a-zA-Z][a-zA-Z0-9-_\.]{1,20}$', value) is None:
         raise ValidationError(
-            (f'Не допустимые символы <{value}> в нике.'),
+            (f'Недопустимые символы <{value}> в никнейме.'),
             params={'value': value},
         )
 
 
 def validate_year(value):
-    now = timezone.now().year
-    if value > now:
+    current_year = timezone.now().year
+    if value > current_year:
         raise ValidationError(
-            f'{value} не может быть больше {now}'
+            f'Год выпуска не может превышать текущий год: {current_year}.'
         )
