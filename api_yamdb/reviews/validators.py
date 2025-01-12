@@ -23,3 +23,10 @@ def validate_year(value):
         raise ValidationError(
             f'Год выпуска не может превышать текущий год: {current_year}.'
         )
+
+
+def validate_score(value):
+    if value < 1 or value > 10:
+        raise ValidationError(
+            'Оценка должна быть в диапазоне от 1 до 10.'
+        )
