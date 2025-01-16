@@ -4,11 +4,13 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.tokens import default_token_generator
 from django.db import models
+from django.db.models import Avg
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 from .validators import (validate_email, validate_name, validate_score,
                          validate_username, validate_year)
+
 
 ROLE_USER = 'user'
 ROLE_ADMIN = 'admin'
@@ -164,6 +166,10 @@ class Title(models.Model):
         related_name='titles',
         verbose_name='Жанры'
     )
+    rating = models.FloatField(
+        default=0.0,
+        verbose_name='Рейтинг'
+    )
 
     class Meta:
         verbose_name = 'Произведение'
@@ -171,6 +177,11 @@ class Title(models.Model):
 
     def __str__(self):
         return self.name
+
+    def update_rating(self):
+        reviews = self.reviews.aggregate(Avg('score'))
+        self.rating = reviews['score__avg'] if reviews['score__avg'] else 0.0
+        self.save(update_fields=['rating'])
 
 
 class Review(models.Model):
