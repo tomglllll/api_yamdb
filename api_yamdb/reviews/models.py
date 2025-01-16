@@ -1,20 +1,23 @@
+import uuid
+
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.tokens import default_token_generator
 from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-import uuid
 
-from .validators import validate_username, validate_year
+from .validators import (validate_email, validate_name, validate_score,
+                         validate_username, validate_year)
 
-USER = 'user'
-ADMIN = 'admin'
-MODERATOR = 'moderator'
+ROLE_USER = 'user'
+ROLE_ADMIN = 'admin'
+ROLE_MODERATOR = 'moderator'
 
 ROLE_CHOICES = [
-    (USER, USER),
-    (ADMIN, ADMIN),
-    (MODERATOR, MODERATOR),
+    (ROLE_USER, ROLE_USER),
+    (ROLE_ADMIN, ROLE_ADMIN),
+    (ROLE_MODERATOR, ROLE_MODERATOR),
 ]
 
 
@@ -27,6 +30,7 @@ class User(AbstractUser):
         null=False
     )
     email = models.EmailField(
+        validators=(validate_email,),
         max_length=254,
         unique=True,
         blank=False,
@@ -36,7 +40,7 @@ class User(AbstractUser):
         'роль',
         max_length=20,
         choices=ROLE_CHOICES,
-        default=USER,
+        default=ROLE_USER,
         blank=True
     )
     bio = models.TextField(
@@ -45,12 +49,14 @@ class User(AbstractUser):
     )
     first_name = models.CharField(
         'имя',
+        validators=(validate_name,),
         max_length=150,
         blank=True,
         null=True
     )
     last_name = models.CharField(
         'фамилия',
+        validators=(validate_name,),
         max_length=150,
         blank=True,
         null=True
@@ -66,15 +72,15 @@ class User(AbstractUser):
 
     @property
     def is_user(self):
-        return self.role == USER
+        return self.role == ROLE_USER
 
     @property
     def is_admin(self):
-        return self.role == ADMIN
+        return self.role == ROLE_ADMIN
 
     @property
     def is_moderator(self):
-        return self.role == MODERATOR
+        return self.role == ROLE_MODERATOR
 
     class Meta:
         ordering = ('id',)
@@ -149,7 +155,9 @@ class Title(models.Model):
         Category,
         on_delete=models.CASCADE,
         related_name='titles',
-        verbose_name='Категория'
+        verbose_name='Категория',
+        null=True,
+        blank=True
     )
     genre = models.ManyToManyField(
         Genre,
@@ -163,3 +171,63 @@ class Title(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Review(models.Model):
+    User = get_user_model()
+    title = models.ForeignKey(
+        Title,
+        on_delete=models.CASCADE,
+        related_name='reviews',
+        verbose_name='Произведение'
+    )
+    text = models.TextField('Текст отзыва')
+    author = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='reviews',
+        verbose_name='Автор отзыва'
+    )
+    score = models.IntegerField(
+        'Оценка',
+        validators=(validate_score,)
+    )
+    pub_date = models.DateTimeField(
+        'Дата публикации',
+        auto_now_add=True
+    )
+
+    class Meta:
+        verbose_name = 'Отзыв'
+        verbose_name_plural = 'Отзывы'
+        unique_together = ('title', 'author')
+
+    def __str__(self):
+        return f'Отзыв {self.author} на {self.title}'
+
+
+class Comment(models.Model):
+    review = models.ForeignKey(
+        Review,
+        on_delete=models.CASCADE,
+        related_name='comments',
+        verbose_name='Отзыв'
+    )
+    text = models.TextField('Текст комментария')
+    author = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='comments',
+        verbose_name='Автор комментария'
+    )
+    pub_date = models.DateTimeField(
+        'Дата публикации',
+        auto_now_add=True
+    )
+
+    class Meta:
+        verbose_name = 'Комментарий'
+        verbose_name_plural = 'Комментарии'
+
+    def __str__(self):
+        return f'Комментарий {self.author} на {self.review}'

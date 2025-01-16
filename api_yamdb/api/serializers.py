@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from reviews.models import Category, Genre, Title, User
+from reviews.models import Category, Genre, Title, User, Review, Comment
 
 
 class UsersSerializer(serializers.ModelSerializer):
@@ -76,3 +76,34 @@ class TitleCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Title
         fields = '__all__'
+
+
+class ReviewSerializer(serializers.ModelSerializer):
+    author = serializers.SlugRelatedField(
+        slug_field='username',
+        read_only=True,
+        default=serializers.CurrentUserDefault()
+    )
+
+    class Meta:
+        model = Review
+        fields = ('title', 'text', 'author', 'score', 'pub_date')
+        read_only_fields = ('id', 'author', 'pub_date')
+
+    def validate_score(self, value):
+        if not (1 <= value <= 10):
+            raise serializers.ValidationError('Выберите значение от 1 до 10')
+        return value
+
+
+class CommentSerializer(serializers.ModelSerializer):
+    author = serializers.SlugRelatedField(
+        slug_field='username',
+        read_only=True,
+        default=serializers.CurrentUserDefault()
+    )
+
+    class Meta:
+        model = Comment
+        fields = ('id', 'text', 'author', 'pub_date')
+        read_only_fields = ('author',)
