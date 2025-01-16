@@ -1,9 +1,10 @@
-import os
 import csv
-from django.core.management.base import BaseCommand
-from django.conf import settings
-from reviews.models import User, Category, Genre, Title, Review, Comment
+import os
 
+from django.conf import settings
+from django.core.management.base import BaseCommand
+
+from reviews.models import Category, Comment, Genre, Review, Title, User
 
 TABLES = {
     User: 'users.csv',

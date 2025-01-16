@@ -1,12 +1,14 @@
-from django.contrib.auth.models import AbstractUser
+import uuid
+
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.tokens import default_token_generator
 from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-import uuid
 
-from .validators import validate_username, validate_year, validate_score
+from .validators import (validate_email, validate_name, validate_score,
+                         validate_username, validate_year)
 
 ROLE_USER = 'user'
 ROLE_ADMIN = 'admin'
@@ -28,6 +30,7 @@ class User(AbstractUser):
         null=False
     )
     email = models.EmailField(
+        validators=(validate_email,),
         max_length=254,
         unique=True,
         blank=False,
@@ -46,12 +49,14 @@ class User(AbstractUser):
     )
     first_name = models.CharField(
         'имя',
+        validators=(validate_name,),
         max_length=150,
         blank=True,
         null=True
     )
     last_name = models.CharField(
         'фамилия',
+        validators=(validate_name,),
         max_length=150,
         blank=True,
         null=True
@@ -183,7 +188,7 @@ class Review(models.Model):
         related_name='reviews',
         verbose_name='Автор отзыва'
     )
-    score = models.PositiveSmallIntegerField(
+    score = models.IntegerField(
         'Оценка',
         validators=(validate_score,)
     )

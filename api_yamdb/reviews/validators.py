@@ -6,14 +6,27 @@ from django.utils import timezone
 
 def validate_username(value):
     if value == 'me':
-        raise ValidationError(
-            ('Имя пользователя не может быть <me>.'),
-            params={'value': value},
-        )
-    if re.search(r'^[a-zA-Z][a-zA-Z0-9-_\.]{1,20}$', value) is None:
+        raise ValidationError('Имя пользователя не может быть me.')
+
+    if not re.match(r'^[\w.@+-]+$', value):
         raise ValidationError(
             (f'Недопустимые символы <{value}> в никнейме.'),
             params={'value': value},
+        )
+
+    if len(value) > 150:
+        raise ValidationError('Username не должен быть длинее 150 симвлов')
+
+
+def validate_email(value):
+    if len(value) > 254:
+        raise ValidationError('Email не должен быть длиннее 254 символов')
+
+
+def validate_name(value):
+    if len(value) > 150:
+        raise ValidationError(
+            'Имя или фамилия не могут быть длиннее 150 символов'
         )
 
 
