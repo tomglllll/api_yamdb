@@ -1,4 +1,4 @@
-from django.core.mail import EmailMessage
+from django.core.mail import send_mail
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
@@ -17,7 +17,7 @@ from .filters import TitleFilter
 from .mixins import CreateListDestroyMixin
 from .permissions import (
     AdminOnly,
-    IsAdminUserOrReadOnly,
+    IsAdminUserOrReadOnly, IsAuthorOrReadOnly
 )
 
 from .serializers import (CategorySerializer, CommentSerializer,
@@ -104,36 +104,62 @@ class APIGetToken(APIView):
 
 
 class APISignup(APIView):
-    permission_classes = (permissions.AllowAny,)
-
-    @staticmethod
-    def send_email(data):
-        try:
-            email = EmailMessage(
-                subject=data['email_subject'],
-                body=data['email_body'],
-                to=[data['to_email']]
-            )
-            email.send()
-        except Exception as e:
-            logger.error(f"Error sending email to {data['to_email']}: {e}")
-            raise
+    permission_classes = (AllowAny,)
 
     def post(self, request):
+        logger.info(f"Получен запрос на регистрацию: {request.data}")
+
         serializer = SignUpSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        email_body = (
-            f'Доброе время суток, {user.username}.'
-            f'\nКод подтверждения для доступа к API: {user.confirmation_code}'
+        if not serializer.is_valid():
+            logger.error(f"Ошибка валидации данных: {serializer.errors}")
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        email = serializer.validated_data['email']
+        username = serializer.validated_data['username']
+        logger.info(f"Данные валидны: email={email}, username={username}")
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            username=username
         )
-        data = {
-            'email_body': email_body,
-            'to_email': user.email,
-            'email_subject': 'Код подтверждения для доступа к API!'
-        }
-        self.send_email(data)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        logger.info(
+            f"Пользователь {'создан' if created else 'найден'}: "
+            f"{user.username}"
+        )
+
+        if created:
+            user.confirmation_code = User.objects.make_random_password(
+                length=6
+            )
+            user.save()
+            logger.info(
+                f"Confirmation code обновлён: {user.confirmation_code}"
+            )
+
+        email_body = (
+            f'Привет, {user.username}.\n'
+            'Ваш код подтверждения для доступа к API: '
+            f'{user.confirmation_code}'
+        )
+        try:
+            send_mail(
+                subject='Код подтверждения для доступа к API!',
+                message=email_body,
+                from_email=None,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+            logger.info(f"Email отправлен на {user.email}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке email: {e}")
+
+        return Response(
+            {'username': user.username, 'email': user.email},
+            status=status.HTTP_200_OK
+        )
 
 
 class CategoryViewSet(CreateListDestroyMixin):
@@ -203,6 +229,30 @@ class ReviewViewSet(viewsets.ModelViewSet):
 
         return super().create(request, *args, **kwargs)
 
+    def check_permission(self, review):
+        user = self.request.user
+        if user.role == 'admin' or user.role == 'moderator':
+            return True
+        return review.author == user
+
+    def update(self, request, *args, **kwargs):
+        review = self.get_object()
+        if not self.check_permission(review):
+            return Response(
+                {'detail': 'Вы не можете редактировать чужой отзыв.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        review = self.get_object()
+        if not self.check_permission(review):
+            return Response(
+                {'detail': 'Вы не можете удалить чужой отзыв.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().destroy(request, *args, **kwargs)
+
 
 class CommentViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete']
@@ -226,10 +276,10 @@ class CommentViewSet(viewsets.ModelViewSet):
         serializer.save(author=self.request.user, review=review)
 
     def check_permission(self, comment):
-        if (comment.author != self.request.user
-                and not self.request.user.is_staff):
-            return False
-        return True
+        user = self.request.user
+        if user.role == 'admin' or user.role == 'moderator':
+            return True
+        return comment.author == user
 
     def update(self, request, *args, **kwargs):
         comment = self.get_object()

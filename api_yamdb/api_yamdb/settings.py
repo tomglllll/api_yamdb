@@ -132,3 +132,27 @@ AUTH_USER_MODEL = 'reviews.User'
 
 MESSAGE_EMAIL_EXISTS = 'Пользователь с таким email уже существует.'
 MESSAGE_USERNAME_EXISTS = 'Пользователь с таким username уже существует.'
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+        },
+        'file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': 'debug.log',
+        },
+    },
+    'loggers': {
+        '': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+    },
+}

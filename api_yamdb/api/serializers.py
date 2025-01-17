@@ -2,6 +2,10 @@ from rest_framework import serializers
 from reviews.models import Category, Genre, Title, User, Review, Comment
 from django.db.models import Avg
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class UsersSerializer(serializers.ModelSerializer):
     class Meta:
@@ -34,19 +38,48 @@ class SignUpSerializer(serializers.ModelSerializer):
         model = User
         fields = ('email', 'username')
 
-    def validate_username(self, value):
-        if User.objects.filter(username=value).exists():
-            raise serializers.ValidationError(
-                'Пользователь с таким именем уже существует.'
-            )
-        return value
+    def validate(self, attrs):
+        email = attrs.get('email')
+        username = attrs.get('username')
+        logger.info(f"Валидация данных: email={email}, username={username}")
 
-    def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
+        if User.objects.filter(email=email).exists():
             raise serializers.ValidationError(
                 'Пользователь с таким email уже существует.'
             )
-        return value
+        if User.objects.filter(username=username).exists():
+            raise serializers.ValidationError(
+                'Пользователь с таким username уже существует.'
+            )
+
+        return attrs
+
+    def create(self, validated_data):
+        email = validated_data['email']
+        username = validated_data['username']
+        logger.info(
+            f"Создание пользователя: email={email}, username={username}"
+        )
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            username=username
+        )
+        logger.info(
+            f"Пользователь {'создан' if created else 'найден'}: "
+            f"{user.username}"
+        )
+
+        if created:
+            user.confirmation_code = User.objects.make_random_password(
+                length=6
+            )
+            user.save()
+            logger.info(
+                f"Confirmation code обновлён: {user.confirmation_code}"
+            )
+
+        return user
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -80,12 +113,14 @@ class TitleGetSerializer(serializers.ModelSerializer):
 class TitleCreateUpdateSerializer(serializers.ModelSerializer):
     category = serializers.SlugRelatedField(
         queryset=Category.objects.all(),
-        slug_field='slug'
+        slug_field='slug',
+        required=False
     )
     genre = serializers.SlugRelatedField(
         queryset=Genre.objects.all(),
         slug_field='slug',
-        many=True
+        many=True,
+        required=False
     )
 
     class Meta:
@@ -93,17 +128,34 @@ class TitleCreateUpdateSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def validate(self, data):
-        if not data.get('category'):
+
+        if 'category' in data and not data['category']:
             raise serializers.ValidationError(
                 {'category': 'Категория не может быть пустой.'}
             )
 
-        if not data.get('genre'):
+        if 'genre' in data and not data['genre']:
             raise serializers.ValidationError(
                 {'genre': 'Жанры не могут быть пустыми.'}
             )
 
         return data
+
+    def update(self, instance, validated_data):
+
+        if 'name' in validated_data:
+            instance.name = validated_data['name']
+        if 'year' in validated_data:
+            instance.year = validated_data['year']
+        if 'description' in validated_data:
+            instance.description = validated_data['description']
+        if 'category' in validated_data:
+            instance.category = validated_data['category']
+        if 'genre' in validated_data:
+            instance.genre.set(validated_data['genre'])
+
+        instance.save()
+        return instance
 
 
 class ReviewSerializer(serializers.ModelSerializer):
