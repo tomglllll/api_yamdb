@@ -3,28 +3,23 @@ from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import (
-    AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly,
-)
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import (AllowAny, IsAuthenticated,
+                                        IsAuthenticatedOrReadOnly)
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from api.permissions import IsAuthorOrReadOnly
 from .filters import TitleFilter
 from .mixins import CreateListDestroyMixin
-from .permissions import (
-    AdminOnly,
-    IsAdminUserOrReadOnly, IsAuthorOrReadOnly
-)
-
+from .permissions import AdminOnly, IsAdminUserOrReadOnly, IsAuthorOrReadOnly
 from .serializers import (CategorySerializer, CommentSerializer,
                           GenreSerializer, GetTokenSerializer,
                           NotAdminSerializer, ReviewSerializer,
                           SignUpSerializer, TitleCreateUpdateSerializer,
                           TitleGetSerializer, UsersSerializer)
+from api.permissions import IsAuthorOrReadOnly
 from reviews.models import Category, Genre, Review, Title, User
 
 
