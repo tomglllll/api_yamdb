@@ -1,23 +1,35 @@
-from django.core.mail import EmailMessage
+from django.core.mail import send_mail
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import (
+    AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly,
+)
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from api.permissions import IsAuthorOrReadOnly
 from .filters import TitleFilter
 from .mixins import CreateListDestroyMixin
-from .permissions import AdminOnly, IsAdminUserOrReadOnly
+from .permissions import (
+    AdminOnly,
+    IsAdminUserOrReadOnly, IsAuthorOrReadOnly
+)
+
 from .serializers import (CategorySerializer, CommentSerializer,
                           GenreSerializer, GetTokenSerializer,
                           NotAdminSerializer, ReviewSerializer,
                           SignUpSerializer, TitleCreateUpdateSerializer,
                           TitleGetSerializer, UsersSerializer)
 from reviews.models import Category, Genre, Review, Title, User
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class UsersViewSet(viewsets.ModelViewSet):
@@ -27,6 +39,7 @@ class UsersViewSet(viewsets.ModelViewSet):
     lookup_field = 'username'
     filter_backends = [filters.SearchFilter]
     search_fields = ['username', 'email']
+    http_method_names = ['get', 'post', 'patch', 'delete']
 
     @action(
         methods=['GET', 'PATCH'],
@@ -58,62 +71,101 @@ class UsersViewSet(viewsets.ModelViewSet):
 
 
 class APIGetToken(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
+        username = request.data.get('username')
+        confirmation_code = request.data.get('confirmation_code')
+
+        if not username or not confirmation_code:
+            return Response(
+                {
+                    'detail': (
+                        'Отсутствуют необходимые данные: username или '
+                        'confirmation_code.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         serializer = GetTokenSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        user = User.objects.filter(username=data['username']).first()
-        if not user:
+        user = get_object_or_404(User, username=data['username'])
+
+        if data.get('confirmation_code') != user.confirmation_code:
             return Response(
-                {'detail': 'Пользователь не найден!'},
-                status=status.HTTP_404_NOT_FOUND
+                {'detail': 'Неверные учетные данные.'},
+                status=status.HTTP_400_BAD_REQUEST
             )
-        if data.get('confirmation_code') == user.confirmation_code:
-            token = RefreshToken.for_user(user).access_token
-            return Response({'token': str(token)},
-                            status=status.HTTP_201_CREATED)
-        return Response(
-            {'confirmation_code': 'Неверный код подтверждения!'},
-            status=status.HTTP_400_BAD_REQUEST)
+
+        token = RefreshToken.for_user(user).access_token
+        return Response({'token': str(token)}, status=status.HTTP_200_OK)
 
 
 class APISignup(APIView):
-    permission_classes = (permissions.AllowAny,)
-
-    @staticmethod
-    def send_email(data):
-        try:
-            email = EmailMessage(
-                subject=data['email_subject'],
-                body=data['email_body'],
-                to=[data['to_email']]
-            )
-            email.send()
-        except Exception as e:
-            print(f"Error sending email: {e}")
-            raise
+    permission_classes = (AllowAny,)
 
     def post(self, request):
+        logger.info(f"Получен запрос на регистрацию: {request.data}")
+
         serializer = SignUpSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        email_body = (
-            f'Доброе время суток, {user.username}.'
-            f'\nКод подтверждения для доступа к API: {user.confirmation_code}'
+        if not serializer.is_valid():
+            logger.error(f"Ошибка валидации данных: {serializer.errors}")
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        email = serializer.validated_data['email']
+        username = serializer.validated_data['username']
+        logger.info(f"Данные валидны: email={email}, username={username}")
+
+        user, created = User.objects.get_or_create(
+            email=email,
+            username=username
         )
-        data = {
-            'email_body': email_body,
-            'to_email': user.email,
-            'email_subject': 'Код подтверждения для доступа к API!'
-        }
-        self.send_email(data)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        logger.info(
+            f"Пользователь {'создан' if created else 'найден'}: "
+            f"{user.username}"
+        )
+
+        if created:
+            user.confirmation_code = User.objects.make_random_password(
+                length=6
+            )
+            user.save()
+            logger.info(
+                f"Confirmation code обновлён: {user.confirmation_code}"
+            )
+
+        email_body = (
+            f'Привет, {user.username}.\n'
+            'Ваш код подтверждения для доступа к API: '
+            f'{user.confirmation_code}'
+        )
+        try:
+            send_mail(
+                subject='Код подтверждения для доступа к API!',
+                message=email_body,
+                from_email=None,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+            logger.info(f"Email отправлен на {user.email}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке email: {e}")
+
+        return Response(
+            {'username': user.username, 'email': user.email},
+            status=status.HTTP_200_OK
+        )
 
 
 class CategoryViewSet(CreateListDestroyMixin):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    permission_classes = (IsAdminUserOrReadOnly, )
+    permission_classes = (IsAdminUserOrReadOnly,)
     lookup_field = 'slug'
     filter_backends = (filters.SearchFilter,)
     search_fields = ('name',)
@@ -123,7 +175,7 @@ class CategoryViewSet(CreateListDestroyMixin):
 class GenreViewSet(CreateListDestroyMixin):
     queryset = Genre.objects.all()
     serializer_class = GenreSerializer
-    permission_classes = (IsAdminUserOrReadOnly, )
+    permission_classes = (IsAdminUserOrReadOnly,)
     lookup_field = 'slug'
     filter_backends = (filters.SearchFilter,)
     search_fields = ['name']
@@ -132,7 +184,7 @@ class GenreViewSet(CreateListDestroyMixin):
 class TitleViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete']
     queryset = Title.objects.all()
-    permission_classes = (IsAdminUserOrReadOnly, )
+    permission_classes = (IsAdminUserOrReadOnly,)
     pagination_class = PageNumberPagination
     filter_backends = [DjangoFilterBackend]
     filterset_class = TitleFilter
@@ -142,42 +194,107 @@ class TitleViewSet(viewsets.ModelViewSet):
             return TitleCreateUpdateSerializer
         return TitleGetSerializer
 
+    def partial_update(self, request, *args, **kwargs):
+        title = self.get_object()
+        serializer = self.get_serializer(
+            title, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 class ReviewViewSet(viewsets.ModelViewSet):
     serializer_class = ReviewSerializer
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticatedOrReadOnly, IsAuthorOrReadOnly)
+
+    http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get_title(self):
-        return get_object_or_404(
-            Title,
-            id=self.kwargs.get('title_id')
-        )
+        return get_object_or_404(Title, id=self.kwargs.get('title_id'))
 
     def get_queryset(self):
-        return Review.objects.filter(
-            title=self.get_title()
-        )
+        return Review.objects.filter(title=self.get_title())
 
     def create(self, request, *args, **kwargs):
-        print("Request data:", request.data)
-        response = super().create(request, *args, **kwargs)
-        print("Response data:", response.data)
-        return response
+        title = self.get_title()
+        user = request.user
+
+        if not user:
+            raise ValidationError('Пользователь не авторизован')
+
+        if Review.objects.filter(title=title, author=user).exists():
+            raise ValidationError(
+                'Вы уже оставляли отзыв для этого произведения.')
+
+        return super().create(request, *args, **kwargs)
+
+    def check_permission(self, review):
+        user = self.request.user
+        if user.role == 'admin' or user.role == 'moderator':
+            return True
+        return review.author == user
+
+    def update(self, request, *args, **kwargs):
+        review = self.get_object()
+        if not self.check_permission(review):
+            return Response(
+                {'detail': 'Вы не можете редактировать чужой отзыв.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        review = self.get_object()
+        if not self.check_permission(review):
+            return Response(
+                {'detail': 'Вы не можете удалить чужой отзыв.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class CommentViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete']
     serializer_class = CommentSerializer
-    permission_classes = (permissions.IsAuthenticatedOrReadOnly,)
+    permission_classes = (
+        permissions.IsAuthenticatedOrReadOnly,
+    )
 
     def get_queryset(self):
         review = get_object_or_404(
             Review,
-            id=self.kwargs.get('review_id'))
+            id=self.kwargs.get('review_id')
+        )
         return review.comments.all()
 
     def perform_create(self, serializer):
         review = get_object_or_404(
             Review,
-            id=self.kwargs.get('review_id'))
+            id=self.kwargs.get('review_id')
+        )
         serializer.save(author=self.request.user, review=review)
+
+    def check_permission(self, comment):
+        user = self.request.user
+        if user.role == 'admin' or user.role == 'moderator':
+            return True
+        return comment.author == user
+
+    def update(self, request, *args, **kwargs):
+        comment = self.get_object()
+        if not self.check_permission(comment):
+            return Response(
+                {'detail': 'Вы не можете редактировать чужой комментарий.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        comment = self.get_object()
+        if not self.check_permission(comment):
+            return Response(
+                {'detail': 'Вы не можете удалить чужой комментарий.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().destroy(request, *args, **kwargs)
