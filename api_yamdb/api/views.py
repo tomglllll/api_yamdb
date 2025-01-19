@@ -27,13 +27,9 @@ from .serializers import (CategorySerializer, CommentSerializer,
                           TitleGetSerializer, UsersSerializer)
 from reviews.models import Category, Genre, Review, Title, User
 
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class UsersViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
+    queryset = User.objects.all().order_by('id')
     serializer_class = UsersSerializer
     permission_classes = (AdminOnly,)
     lookup_field = 'username'
@@ -107,21 +103,14 @@ class APISignup(APIView):
     permission_classes = (AllowAny,)
 
     def post(self, request):
-        logger.info(f"Получен запрос на регистрацию: {request.data}")
-
         serializer = SignUpSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data['email']
         username = serializer.validated_data['username']
-        logger.info(f"Данные валидны: email={email}, username={username}")
 
         user, created = User.objects.get_or_create(
             email=email,
             username=username
-        )
-        logger.info(
-            f"Пользователь {'создан' if created else 'найден'}: "
-            f"{user.username}"
         )
 
         if not created:
@@ -129,35 +118,24 @@ class APISignup(APIView):
                 length=6
             )
             user.save()
-            logger.info(
-                "Confirmation code обновлён для существующего пользователя: "
-                f"{user.confirmation_code}"
-            )
         else:
             user.confirmation_code = User.objects.make_random_password(
                 length=6
             )
             user.save()
-            logger.info(
-                f"Confirmation code создан: {user.confirmation_code}"
-            )
 
         email_body = (
             f'Привет, {user.username}.\n'
             'Ваш код подтверждения для доступа к API: '
             f'{user.confirmation_code}'
         )
-        try:
-            send_mail(
-                subject='Код подтверждения для доступа к API!',
-                message=email_body,
-                from_email=None,
-                recipient_list=[user.email],
-                fail_silently=False,
-            )
-            logger.info(f"Email отправлен на {user.email}")
-        except Exception as e:
-            logger.error(f"Ошибка при отправке email: {e}")
+        send_mail(
+            subject='Код подтверждения для доступа к API!',
+            message=email_body,
+            from_email=None,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
 
         return Response(
             {'username': user.username, 'email': user.email},
@@ -166,7 +144,7 @@ class APISignup(APIView):
 
 
 class CategoryViewSet(CreateListDestroyMixin):
-    queryset = Category.objects.all()
+    queryset = Category.objects.all().order_by('id')
     serializer_class = CategorySerializer
     permission_classes = (IsAdminUserOrReadOnly,)
     lookup_field = 'slug'
@@ -176,7 +154,7 @@ class CategoryViewSet(CreateListDestroyMixin):
 
 
 class GenreViewSet(CreateListDestroyMixin):
-    queryset = Genre.objects.all()
+    queryset = Genre.objects.all().order_by('id')
     serializer_class = GenreSerializer
     permission_classes = (IsAdminUserOrReadOnly,)
     lookup_field = 'slug'
@@ -186,7 +164,7 @@ class GenreViewSet(CreateListDestroyMixin):
 
 class TitleViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete']
-    queryset = Title.objects.all()
+    queryset = Title.objects.all().order_by('id')
     permission_classes = (IsAdminUserOrReadOnly,)
     pagination_class = PageNumberPagination
     filter_backends = [DjangoFilterBackend]
@@ -217,7 +195,7 @@ class ReviewViewSet(viewsets.ModelViewSet):
         return get_object_or_404(Title, id=self.kwargs.get('title_id'))
 
     def get_queryset(self):
-        return Review.objects.filter(title=self.get_title())
+        return Review.objects.filter(title=self.get_title()).order_by('id')
 
     def create(self, request, *args, **kwargs):
         title = self.get_title()
@@ -269,7 +247,7 @@ class CommentViewSet(viewsets.ModelViewSet):
             Review,
             id=self.kwargs.get('review_id')
         )
-        return review.comments.all()
+        return review.comments.all().order_by('id')
 
     def perform_create(self, serializer):
         review = get_object_or_404(

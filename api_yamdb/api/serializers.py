@@ -4,10 +4,6 @@ from django.db.models import Avg
 
 from reviews.validators import validate_username, validate_email
 
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class UsersSerializer(serializers.ModelSerializer):
     class Meta:
@@ -48,6 +44,32 @@ class SignUpSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ('email', 'username')
+
+    def validate(self, attrs):
+        email = attrs.get('email')
+        username = attrs.get('username')
+
+        existing_user = User.objects.filter(email=email).exclude(
+            username=username
+        ).first()
+        if existing_user:
+            raise serializers.ValidationError(
+                'Пользователь с таким email уже существует, '
+                'но username отличается.'
+            )
+
+        existing_user = User.objects.filter(
+            username=username
+        ).exclude(
+            email=email
+        ).first()
+        if existing_user:
+            raise serializers.ValidationError(
+                'Пользователь с таким username уже существует, '
+                'но email отличается.'
+            )
+
+        return attrs
 
 
 class CategorySerializer(serializers.ModelSerializer):
