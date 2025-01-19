@@ -110,13 +110,7 @@ class APISignup(APIView):
         logger.info(f"Получен запрос на регистрацию: {request.data}")
 
         serializer = SignUpSerializer(data=request.data)
-        if not serializer.is_valid():
-            logger.error(f"Ошибка валидации данных: {serializer.errors}")
-            return Response(
-                serializer.errors,
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
+        serializer.is_valid(raise_exception=True)
         email = serializer.validated_data['email']
         username = serializer.validated_data['username']
         logger.info(f"Данные валидны: email={email}, username={username}")
@@ -130,13 +124,22 @@ class APISignup(APIView):
             f"{user.username}"
         )
 
-        if created:
+        if not created:
             user.confirmation_code = User.objects.make_random_password(
                 length=6
             )
             user.save()
             logger.info(
-                f"Confirmation code обновлён: {user.confirmation_code}"
+                "Confirmation code обновлён для существующего пользователя: "
+                f"{user.confirmation_code}"
+            )
+        else:
+            user.confirmation_code = User.objects.make_random_password(
+                length=6
+            )
+            user.save()
+            logger.info(
+                f"Confirmation code создан: {user.confirmation_code}"
             )
 
         email_body = (

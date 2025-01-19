@@ -2,6 +2,8 @@ from rest_framework import serializers
 from reviews.models import Category, Genre, Title, User, Review, Comment
 from django.db.models import Avg
 
+from reviews.validators import validate_username, validate_email
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,52 +36,18 @@ class GetTokenSerializer(serializers.ModelSerializer):
 
 
 class SignUpSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(
+        required=True,
+        validators=(validate_username,)
+    )
+    email = serializers.EmailField(
+        required=True,
+        validators=(validate_email,)
+    )
+
     class Meta:
         model = User
         fields = ('email', 'username')
-
-    def validate(self, attrs):
-        email = attrs.get('email')
-        username = attrs.get('username')
-        logger.info(f"Валидация данных: email={email}, username={username}")
-
-        if User.objects.filter(email=email).exists():
-            raise serializers.ValidationError(
-                'Пользователь с таким email уже существует.'
-            )
-        if User.objects.filter(username=username).exists():
-            raise serializers.ValidationError(
-                'Пользователь с таким username уже существует.'
-            )
-
-        return attrs
-
-    def create(self, validated_data):
-        email = validated_data['email']
-        username = validated_data['username']
-        logger.info(
-            f"Создание пользователя: email={email}, username={username}"
-        )
-
-        user, created = User.objects.get_or_create(
-            email=email,
-            username=username
-        )
-        logger.info(
-            f"Пользователь {'создан' if created else 'найден'}: "
-            f"{user.username}"
-        )
-
-        if created:
-            user.confirmation_code = User.objects.make_random_password(
-                length=6
-            )
-            user.save()
-            logger.info(
-                f"Confirmation code обновлён: {user.confirmation_code}"
-            )
-
-        return user
 
 
 class CategorySerializer(serializers.ModelSerializer):
