@@ -8,7 +8,6 @@ from django.db.models import Avg
 from .validators import (validate_email, validate_name, validate_score,
                          validate_username, validate_year)
 
-
 ROLE_USER = 'user'
 ROLE_ADMIN = 'admin'
 ROLE_MODERATOR = 'moderator'

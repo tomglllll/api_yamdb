@@ -1,8 +1,8 @@
-from rest_framework import serializers
-from reviews.models import Category, Genre, Title, User, Review, Comment
 from django.db.models import Avg
+from rest_framework import serializers
 
-from reviews.validators import validate_username, validate_email
+from reviews.models import Category, Comment, Genre, Review, Title, User
+from reviews.validators import validate_email, validate_username
 
 
 class UsersSerializer(serializers.ModelSerializer):
