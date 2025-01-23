@@ -3,15 +3,19 @@ import uuid
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser
 from django.db import models
-from django.db.models import Avg
 
-from .validators import (validate_email, validate_name, validate_score,
-                         validate_username, validate_year)
+from .constants import (EMAIL_MAX_LENGTH, NAME_MAX_LENGTH, SLUG_MAX_LENGTH,
+                        USERNAME_MAX_LENGTH, TITLE_GENRE_CATEGORY_MAX_LENGTH,
+                        CONF_CODE_MAX_LENGTH)
+from .validators import validate_score, validate_username, validate_year
 
 ROLE_USER = 'user'
 ROLE_ADMIN = 'admin'
 ROLE_MODERATOR = 'moderator'
 
+
+# Можно лучше: В Джанго есть подходящие енамы для организации вариантов выбора.
+# https://docs.djangoproject.com/en/3.2/ref/models/fields/#enumeration-types
 ROLE_CHOICES = [
     (ROLE_USER, ROLE_USER),
     (ROLE_ADMIN, ROLE_ADMIN),
@@ -22,66 +26,71 @@ ROLE_CHOICES = [
 class User(AbstractUser):
     username = models.CharField(
         validators=(validate_username,),
-        max_length=150,
+        max_length=USERNAME_MAX_LENGTH,
         unique=True,
-        blank=False,
-        null=False
     )
     email = models.EmailField(
-        validators=(validate_email,),
-        max_length=254,
+        max_length=EMAIL_MAX_LENGTH,
         unique=True,
-        blank=False,
-        null=False
     )
     role = models.CharField(
         'роль',
         max_length=20,
+        # TODO Максимальную длину стоит задать с запасом, чтобы в случае
+        # добавления новой роли мы не уперлись в лимит символов (мы не знаем
+        # какую роль понадобится добавить).
+
+        # Можно лучше: можно прописать вычисление максимальной длины из
+        # существующих ролей, т.е. взять длины всех ролей, и выбрать из них
+        # максимальную. Это можно сделать прямо в этой строке. Понадобится
+        # функция max, в которую надо передать список с длинами ролей (его
+        # можно сформировать через list comprehension или через map и list.
+
         choices=ROLE_CHOICES,
         default=ROLE_USER,
         blank=True
     )
+
     bio = models.TextField(
         'биография',
         blank=True,
     )
     first_name = models.CharField(
         'имя',
-        validators=(validate_name,),
-        max_length=150,
+        max_length=NAME_MAX_LENGTH,
         blank=True,
         null=True
     )
     last_name = models.CharField(
         'фамилия',
-        validators=(validate_name,),
-        max_length=150,
+        max_length=NAME_MAX_LENGTH,
         blank=True,
         null=True
     )
     confirmation_code = models.CharField(
+        # Можно лучше: Можно не хранить код подтверждения в БД, если
+        # использовать default_token_generator из django.contrib.auth.tokens.
+        # У этого объекта есть два метода: для генерации токена - make_token и
+        # для проверки полученного токена  - check_token (оба метода принимают
+        # на вход объект пользователя).
+
         'код подтверждения',
-        max_length=255,
+        max_length=CONF_CODE_MAX_LENGTH,
         unique=True,
         null=True,
-        blank=False,
         default=uuid.uuid4
     )
 
     @property
-    def is_user(self):
-        return self.role == ROLE_USER
-
-    @property
     def is_admin(self):
-        return self.role == ROLE_ADMIN
+        return self.role == ROLE_ADMIN or self.is_staff or self.is_superuser
 
     @property
     def is_moderator(self):
         return self.role == ROLE_MODERATOR
 
     class Meta:
-        ordering = ('id',)
+        ordering = ('username',)
         verbose_name = 'Пользователь'
         verbose_name_plural = 'Пользователи'
 
@@ -91,11 +100,11 @@ class User(AbstractUser):
 
 class Category(models.Model):
     name = models.CharField(
-        max_length=256,
+        max_length=TITLE_GENRE_CATEGORY_MAX_LENGTH,
         verbose_name='Название категории'
     )
     slug = models.SlugField(
-        max_length=50,
+        max_length=SLUG_MAX_LENGTH,
         unique=True,
         verbose_name='Слаг категории'
     )
@@ -103,6 +112,7 @@ class Category(models.Model):
     class Meta:
         verbose_name = 'Категория'
         verbose_name_plural = 'Категории'
+        ordering = ('name',)
 
     def __str__(self):
         return self.name
@@ -110,12 +120,12 @@ class Category(models.Model):
 
 class Genre(models.Model):
     name = models.CharField(
-        max_length=256,
+        max_length=TITLE_GENRE_CATEGORY_MAX_LENGTH,
         unique=True,
         verbose_name='Название жанра'
     )
     slug = models.SlugField(
-        max_length=50,
+        max_length=SLUG_MAX_LENGTH,
         unique=True,
         verbose_name='Слаг жанра'
     )
@@ -123,6 +133,7 @@ class Genre(models.Model):
     class Meta:
         verbose_name = 'Жанр'
         verbose_name_plural = 'Жанры'
+        ordering = ('name',)
 
     def __str__(self):
         return self.name
@@ -130,7 +141,7 @@ class Genre(models.Model):
 
 class Title(models.Model):
     name = models.CharField(
-        max_length=256,
+        max_length=TITLE_GENRE_CATEGORY_MAX_LENGTH,
         verbose_name='Название произведения'
     )
     year = models.PositiveIntegerField(
@@ -154,22 +165,25 @@ class Title(models.Model):
         related_name='titles',
         verbose_name='Жанры'
     )
-    rating = models.FloatField(
+
+    rating = models.IntegerField(
+        # Рейтинг - вычисляемое поле. Его не надо хранить в БД Надо
+        # добавьте атрибут rating для всех элементов QuerySet путем его 
+        # aннотирования во вью. Документация для annotate и для Avg
+        # https://docs.djangoproject.com/en/4.1/ref/models/querysets/#django.db.models.query.QuerySet.annotate
+        # https://docs.djangoproject.com/en/5.1/ref/models/querysets/#avg
         default=0.0,
+        # В соответствии со спецификацией поле с рейтингом - целое число.
         verbose_name='Рейтинг'
     )
 
     class Meta:
         verbose_name = 'Произведение'
         verbose_name_plural = 'Произведения'
+        ordering = ('name',)
 
     def __str__(self):
         return self.name
-
-    def update_rating(self):
-        reviews = self.reviews.aggregate(Avg('score'))
-        self.rating = reviews['score__avg'] if reviews['score__avg'] else 0.0
-        self.save(update_fields=['rating'])
 
 
 class Review(models.Model):
@@ -187,7 +201,7 @@ class Review(models.Model):
         related_name='reviews',
         verbose_name='Автор отзыва'
     )
-    score = models.IntegerField(
+    score = models.PositiveSmallIntegerField(
         'Оценка',
         validators=(validate_score,)
     )
@@ -200,6 +214,7 @@ class Review(models.Model):
         verbose_name = 'Отзыв'
         verbose_name_plural = 'Отзывы'
         unique_together = ('title', 'author')
+        ordering = ('pub_date',)
 
     def __str__(self):
         return f'Отзыв {self.author} на {self.title}'
@@ -227,6 +242,7 @@ class Comment(models.Model):
     class Meta:
         verbose_name = 'Комментарий'
         verbose_name_plural = 'Комментарии'
+        ordering = ('pub_date',)
 
     def __str__(self):
         return f'Комментарий {self.author} на {self.review}'
