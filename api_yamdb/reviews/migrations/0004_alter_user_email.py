@@ -14,6 +14,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='user',
             name='email',
-            field=models.EmailField(max_length=254, validators=[reviews.validators.validate_email]),
+            field=models.EmailField(max_length=254,),
         ),
     ]
