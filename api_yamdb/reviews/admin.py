@@ -24,7 +24,7 @@ class GenreAdmin(admin.ModelAdmin):
 @admin.register(Title)
 class TitleAdmin(admin.ModelAdmin):
     list_display = ('name', 'year', 'category', 'description')
-    list_filter = ('category', )
+    list_filter = ('category',)
     search_fields = ('name',)
 
 
@@ -49,8 +49,42 @@ class UserAdmin(UserAdmin):
         'role',
         'first_name',
         'last_name',
-        'confirmation_code',
+        'email_confirmed',
         'bio'
     )
-    search_fields = ('username',)
-    list_filter = ('role',)
+    search_fields = ('username', 'email', 'first_name', 'last_name')
+    list_filter = ('role', 'email_confirmed')
+
+    fieldsets = (
+        (None, {'fields': ('username', 'password')}),
+        ('Personal info', {
+            'fields': (
+                'first_name',
+                'last_name',
+                'email',
+                'bio'
+            )
+        }),
+        ('Permissions', {
+            'fields': (
+                'role',
+                'is_active',
+                'is_staff',
+                'is_superuser',
+                'groups',
+                'user_permissions',
+            ),
+        }),
+        ('Important dates', {'fields': ('last_login', 'date_joined')}),
+        ('Email Confirmation', {'fields': ('email_confirmed',)}),
+    )
+
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': (
+                'username', 'email', 'password1', 'password2', 'role',
+                'email_confirmed'
+            ),
+        }),
+    )

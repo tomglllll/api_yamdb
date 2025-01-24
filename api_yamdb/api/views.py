@@ -1,3 +1,4 @@
+from django.db.models import Avg
 from django.core.mail import send_mail
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
@@ -9,6 +10,8 @@ from rest_framework.permissions import (AllowAny, IsAuthenticated,
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode
 
 from .filters import TitleFilter
 from .mixins import CategoryGenreViewSet
@@ -61,9 +64,10 @@ class APIGetToken(APIView):
         data = serializer.validated_data
         user = get_object_or_404(User, username=data['username'])
 
-        if data.get('confirmation_code') != user.confirmation_code:
+        token = data.get('token')
+        if not default_token_generator.check_token(user, token):
             return Response(
-                {'detail': 'Неверные учетные данные.'},
+                {'detail': 'Неверный токен.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -85,24 +89,16 @@ class APISignup(APIView):
             username=username
         )
 
-        if not created:
-            user.confirmation_code = User.objects.make_random_password(
-                length=6
-            )
-            user.save()
-        else:
-            user.confirmation_code = User.objects.make_random_password(
-                length=6
-            )
-            user.save()
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(str(user.pk).encode())
 
         email_body = (
             f'Привет, {user.username}.\n'
-            'Ваш код подтверждения для доступа к API: '
-            f'{user.confirmation_code}'
+            'Для подтверждения email перейдите по ссылке: '
+            f'http://example.com/confirm/{uid}/{token}'
         )
         send_mail(
-            subject='Код подтверждения для доступа к API!',
+            subject='Подтверждение email для доступа к API!',
             message=email_body,
             from_email=None,
             recipient_list=[user.email],
@@ -127,7 +123,9 @@ class GenreViewSet(CategoryGenreViewSet):
 
 class TitleViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete']
-    queryset = Title.objects.all().order_by('id')
+    queryset = Title.objects.annotate(
+        rating=Avg('reviews__score')
+    ).order_by('id')
     permission_classes = (IsAdminUserOrReadOnly,)
     pagination_class = PageNumberPagination
     filter_backends = [DjangoFilterBackend]
@@ -142,7 +140,6 @@ class TitleViewSet(viewsets.ModelViewSet):
 class ReviewViewSet(viewsets.ModelViewSet):
     serializer_class = ReviewSerializer
     permission_classes = (IsAuthenticatedOrReadOnly, IsAuthorOrReadOnly)
-
     http_method_names = ['get', 'post', 'patch', 'delete']
 
     def get_title(self):
