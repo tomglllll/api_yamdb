@@ -1,12 +1,15 @@
-import uuid
-
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
 
-from .constants import (EMAIL_MAX_LENGTH, NAME_MAX_LENGTH, SLUG_MAX_LENGTH,
-                        USERNAME_MAX_LENGTH, TITLE_GENRE_CATEGORY_MAX_LENGTH,
-                        CONF_CODE_MAX_LENGTH)
+from .constants import (
+    EMAIL_MAX_LENGTH, NAME_MAX_LENGTH, SLUG_MAX_LENGTH,
+    USERNAME_MAX_LENGTH, TITLE_GENRE_CATEGORY_MAX_LENGTH
+)
 from .validators import validate_score, validate_username, validate_year
 
 ROLE_USER = 'user'
@@ -14,88 +17,100 @@ ROLE_ADMIN = 'admin'
 ROLE_MODERATOR = 'moderator'
 
 
-# Можно лучше: В Джанго есть подходящие енамы для организации вариантов выбора.
-# https://docs.djangoproject.com/en/3.2/ref/models/fields/#enumeration-types
-ROLE_CHOICES = [
-    (ROLE_USER, ROLE_USER),
-    (ROLE_ADMIN, ROLE_ADMIN),
-    (ROLE_MODERATOR, ROLE_MODERATOR),
-]
+class RoleChoices(models.TextChoices):
+    USER = ROLE_USER, 'User'
+    ADMIN = ROLE_ADMIN, 'Admin'
+    MODERATOR = ROLE_MODERATOR, 'Moderator'
 
 
 class User(AbstractUser):
     username = models.CharField(
-        validators=(validate_username,),
+        validators=[validate_username],
         max_length=USERNAME_MAX_LENGTH,
         unique=True,
+        db_index=True
     )
     email = models.EmailField(
         max_length=EMAIL_MAX_LENGTH,
         unique=True,
+        db_index=True
     )
     role = models.CharField(
-        'роль',
-        max_length=20,
-        # TODO Максимальную длину стоит задать с запасом, чтобы в случае
-        # добавления новой роли мы не уперлись в лимит символов (мы не знаем
-        # какую роль понадобится добавить).
-
-        # Можно лучше: можно прописать вычисление максимальной длины из
-        # существующих ролей, т.е. взять длины всех ролей, и выбрать из них
-        # максимальную. Это можно сделать прямо в этой строке. Понадобится
-        # функция max, в которую надо передать список с длинами ролей (его
-        # можно сформировать через list comprehension или через map и list.
-
-        choices=ROLE_CHOICES,
-        default=ROLE_USER,
+        'Роль',
+        max_length=max(len(role) for role, _ in RoleChoices.choices),
+        choices=RoleChoices.choices,
+        default=RoleChoices.USER,
         blank=True
     )
-
-    bio = models.TextField(
-        'биография',
-        blank=True,
-    )
+    email_confirmed = models.BooleanField(default=False, blank=True)
+    bio = models.TextField('Биография', blank=True)
     first_name = models.CharField(
-        'имя',
+        'Имя',
         max_length=NAME_MAX_LENGTH,
         blank=True,
         null=True
     )
     last_name = models.CharField(
-        'фамилия',
+        'Фамилия',
         max_length=NAME_MAX_LENGTH,
         blank=True,
         null=True
     )
-    confirmation_code = models.CharField(
-        # Можно лучше: Можно не хранить код подтверждения в БД, если
-        # использовать default_token_generator из django.contrib.auth.tokens.
-        # У этого объекта есть два метода: для генерации токена - make_token и
-        # для проверки полученного токена  - check_token (оба метода принимают
-        # на вход объект пользователя).
-
-        'код подтверждения',
-        max_length=CONF_CODE_MAX_LENGTH,
-        unique=True,
-        null=True,
-        default=uuid.uuid4
-    )
 
     @property
     def is_admin(self):
-        return self.role == ROLE_ADMIN or self.is_staff or self.is_superuser
+        return (
+            self.role == RoleChoices.ADMIN
+            or self.is_staff
+            or self.is_superuser
+        )
 
     @property
     def is_moderator(self):
-        return self.role == ROLE_MODERATOR
+        return self.role == RoleChoices.MODERATOR
 
     class Meta:
-        ordering = ('username',)
+        ordering = ['username']
         verbose_name = 'Пользователь'
         verbose_name_plural = 'Пользователи'
 
     def __str__(self):
         return self.username
+
+    def generate_confirmation_token(self):
+
+        return default_token_generator.make_token(self)
+
+    def send_confirmation_email(self):
+
+        token = self.generate_confirmation_token()
+        uid = urlsafe_base64_encode(str(self.pk).encode()).decode()
+        confirmation_url = f'http://example.com/confirm/{uid}/{token}'
+
+        subject = 'Подтверждение email'
+        message = render_to_string('email/confirmation_email.html', {
+            'user': self,
+            'confirmation_url': confirmation_url,
+        })
+
+        send_mail(subject, message, 'from@example.com', [self.email])
+
+    def confirm_email(self, uid, token):
+
+        try:
+            uid = urlsafe_base64_decode(uid).decode()
+            user = get_user_model().objects.get(pk=uid)
+        except (
+            TypeError, ValueError, OverflowError,
+            get_user_model().DoesNotExist
+        ):
+            return False
+
+        if default_token_generator.check_token(user, token):
+            user.email_confirmed = True
+            user.save()
+            return True
+        return False
 
 
 class Category(models.Model):
@@ -106,13 +121,14 @@ class Category(models.Model):
     slug = models.SlugField(
         max_length=SLUG_MAX_LENGTH,
         unique=True,
-        verbose_name='Слаг категории'
+        verbose_name='Слаг категории',
+        db_index=True
     )
 
     class Meta:
         verbose_name = 'Категория'
         verbose_name_plural = 'Категории'
-        ordering = ('name',)
+        ordering = ['name']
 
     def __str__(self):
         return self.name
@@ -127,13 +143,14 @@ class Genre(models.Model):
     slug = models.SlugField(
         max_length=SLUG_MAX_LENGTH,
         unique=True,
-        verbose_name='Слаг жанра'
+        verbose_name='Слаг жанра',
+        db_index=True
     )
 
     class Meta:
         verbose_name = 'Жанр'
         verbose_name_plural = 'Жанры'
-        ordering = ('name',)
+        ordering = ['name']
 
     def __str__(self):
         return self.name
@@ -166,28 +183,16 @@ class Title(models.Model):
         verbose_name='Жанры'
     )
 
-    rating = models.IntegerField(
-        # Рейтинг - вычисляемое поле. Его не надо хранить в БД Надо
-        # добавьте атрибут rating для всех элементов QuerySet путем его 
-        # aннотирования во вью. Документация для annotate и для Avg
-        # https://docs.djangoproject.com/en/4.1/ref/models/querysets/#django.db.models.query.QuerySet.annotate
-        # https://docs.djangoproject.com/en/5.1/ref/models/querysets/#avg
-        default=0.0,
-        # В соответствии со спецификацией поле с рейтингом - целое число.
-        verbose_name='Рейтинг'
-    )
-
     class Meta:
         verbose_name = 'Произведение'
         verbose_name_plural = 'Произведения'
-        ordering = ('name',)
+        ordering = ['name']
 
     def __str__(self):
         return self.name
 
 
 class Review(models.Model):
-    User = get_user_model()
     title = models.ForeignKey(
         Title,
         on_delete=models.CASCADE,
@@ -196,25 +201,31 @@ class Review(models.Model):
     )
     text = models.TextField('Текст отзыва')
     author = models.ForeignKey(
-        User,
+        get_user_model(),
         on_delete=models.CASCADE,
         related_name='reviews',
         verbose_name='Автор отзыва'
     )
     score = models.PositiveSmallIntegerField(
         'Оценка',
-        validators=(validate_score,)
+        validators=[validate_score]
     )
     pub_date = models.DateTimeField(
         'Дата публикации',
-        auto_now_add=True
+        auto_now_add=True,
+        db_index=True
     )
 
     class Meta:
         verbose_name = 'Отзыв'
         verbose_name_plural = 'Отзывы'
-        unique_together = ('title', 'author')
-        ordering = ('pub_date',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=['title', 'author'],
+                name='unique_review_per_author_per_title'
+            )
+        ]
+        ordering = ['pub_date']
 
     def __str__(self):
         return f'Отзыв {self.author} на {self.title}'
@@ -229,20 +240,21 @@ class Comment(models.Model):
     )
     text = models.TextField('Текст комментария')
     author = models.ForeignKey(
-        User,
+        get_user_model(),
         on_delete=models.CASCADE,
         related_name='comments',
         verbose_name='Автор комментария'
     )
     pub_date = models.DateTimeField(
         'Дата публикации',
-        auto_now_add=True
+        auto_now_add=True,
+        db_index=True
     )
 
     class Meta:
         verbose_name = 'Комментарий'
         verbose_name_plural = 'Комментарии'
-        ordering = ('pub_date',)
+        ordering = ['pub_date']
 
     def __str__(self):
         return f'Комментарий {self.author} на {self.review}'
