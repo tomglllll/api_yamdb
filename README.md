@@ -7,6 +7,14 @@
 
 ---
 
+## Стек технологий
+- Python 3.9
+- Django 3.2
+- Django REST Framework
+- Simple JWT
+
+---
+
 ## Основные функции
 
 ### Произведения (Titles):
@@ -82,3 +90,15 @@ python manage.py load_data
 ```bash
 python manage.py runserver
 ```
+
+## Документация API
+После окального запуска проекта спецификацию API можно найти по адресу:
+```
+http://127.0.0.1:8000/redoc/
+```
+
+---
+
+## Авторы
+- [tomglllll](https://github.com/tomglllll)
+- [TRU-FUN](https://github.com/TRU-FUN)
