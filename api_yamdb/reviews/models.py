@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.http import urlsafe_base64_encode
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 
@@ -28,12 +28,10 @@ class User(AbstractUser):
         validators=[validate_username],
         max_length=USERNAME_MAX_LENGTH,
         unique=True,
-        db_index=True
     )
     email = models.EmailField(
         max_length=EMAIL_MAX_LENGTH,
         unique=True,
-        db_index=True
     )
     role = models.CharField(
         'Роль',
@@ -95,65 +93,36 @@ class User(AbstractUser):
 
         send_mail(subject, message, 'from@example.com', [self.email])
 
-    def confirm_email(self, uid, token):
 
-        try:
-            uid = urlsafe_base64_decode(uid).decode()
-            user = get_user_model().objects.get(pk=uid)
-        except (
-            TypeError, ValueError, OverflowError,
-            get_user_model().DoesNotExist
-        ):
-            return False
-
-        if default_token_generator.check_token(user, token):
-            user.email_confirmed = True
-            user.save()
-            return True
-        return False
-
-
-class Category(models.Model):
+class CategoryGenreBaseModel(models.Model):
     name = models.CharField(
         max_length=TITLE_GENRE_CATEGORY_MAX_LENGTH,
-        verbose_name='Название категории'
+        verbose_name='Название'
     )
     slug = models.SlugField(
         max_length=SLUG_MAX_LENGTH,
         unique=True,
-        verbose_name='Слаг категории',
-        db_index=True
+        verbose_name='Слаг',
     )
 
+    class Meta:
+        abstract = True
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class Category(CategoryGenreBaseModel):
     class Meta:
         verbose_name = 'Категория'
         verbose_name_plural = 'Категории'
-        ordering = ['name']
-
-    def __str__(self):
-        return self.name
 
 
-class Genre(models.Model):
-    name = models.CharField(
-        max_length=TITLE_GENRE_CATEGORY_MAX_LENGTH,
-        unique=True,
-        verbose_name='Название жанра'
-    )
-    slug = models.SlugField(
-        max_length=SLUG_MAX_LENGTH,
-        unique=True,
-        verbose_name='Слаг жанра',
-        db_index=True
-    )
-
+class Genre(CategoryGenreBaseModel):
     class Meta:
         verbose_name = 'Жанр'
         verbose_name_plural = 'Жанры'
-        ordering = ['name']
-
-    def __str__(self):
-        return self.name
 
 
 class Title(models.Model):

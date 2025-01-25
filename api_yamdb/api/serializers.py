@@ -1,8 +1,12 @@
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.shortcuts import get_object_or_404
+from django.utils.http import urlsafe_base64_encode
 from rest_framework import serializers
-from reviews.models import Category, Comment, Genre, Review, Title, User
-from reviews.validators import validate_username
 
 from reviews.constants import EMAIL_MAX_LENGTH, USERNAME_MAX_LENGTH
+from reviews.models import Category, Comment, Genre, Review, Title, User
+from reviews.validators import validate_username
 
 
 class UsersSerializer(serializers.ModelSerializer):
@@ -35,6 +39,15 @@ class NotAdminSerializer(serializers.ModelSerializer):
 class GetTokenSerializer(serializers.Serializer):
     username = serializers.CharField(required=True)
     confirmation_code = serializers.CharField(required=True)
+
+    def validate(self, data):
+        username = data.get('username')
+        confirmation_code = data.get('confirmation_code')
+
+        user = get_object_or_404(User, username=username)
+        if not default_token_generator.check_token(user, confirmation_code):
+            raise serializers.ValidationError({'Неверный токен'})
+        return data
 
 
 class SignUpSerializer(serializers.Serializer):
@@ -74,14 +87,27 @@ class SignUpSerializer(serializers.Serializer):
 
         return attrs
 
-    def create(self, validated_data):
+    def save(self):
+        validated_data = self.validated_data
         user, created = User.objects.get_or_create(
             username=validated_data['username'],
             email=validated_data['email']
         )
+        token = default_token_generator.make_token(user)
+        uid = urlsafe_base64_encode(str(user.pk).encode())
+        email_body = (
+            f'Привет, {user.username}.\n\n'
+            f'Для подтверждения email перейдите по ссылке: '
+            f'http://example.com/confirm/{uid}/{token}'
+        )
 
-        if created:
-            user.send_confirmation_email()
+        send_mail(
+            subject='Подтверждение email для доступа к API!',
+            message=email_body,
+            from_email=None,
+            recipient_list=[validated_data['email']],
+            fail_silently=False
+        )
 
         return user
 
@@ -117,6 +143,8 @@ class TitleCreateUpdateSerializer(serializers.ModelSerializer):
         queryset=Genre.objects.all(),
         slug_field='slug',
         many=True,
+        allow_null=False,
+        allow_empty=False
     )
 
     class Meta:
@@ -135,8 +163,7 @@ class ReviewSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Review
-        fields = ('id', 'title', 'text', 'author', 'score', 'pub_date')
-        read_only_fields = ('id', 'author', 'pub_date', 'title')
+        fields = ('id', 'text', 'author', 'score', 'pub_date')
 
     def validate(self, data):
         request = self.context['request']

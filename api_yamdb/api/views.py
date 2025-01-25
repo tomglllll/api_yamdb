@@ -1,5 +1,4 @@
 from django.db.models import Avg
-from django.core.mail import send_mail
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
@@ -10,8 +9,6 @@ from rest_framework.permissions import (AllowAny, IsAuthenticated,
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import AccessToken
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode
 
 from .filters import TitleFilter
 from .mixins import CategoryGenreViewSet
@@ -49,11 +46,6 @@ class UsersViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(UsersSerializer(request.user).data)
 
-    def destroy(self, request, *args, **kwargs):
-        user = self.get_object()
-        user.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
 
 class APIGetToken(APIView):
     permission_classes = [AllowAny]
@@ -61,16 +53,9 @@ class APIGetToken(APIView):
     def post(self, request):
         serializer = GetTokenSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-        user = get_object_or_404(User, username=data['username'])
 
-        token = data.get('token')
-        if not default_token_generator.check_token(user, token):
-            return Response(
-                {'detail': 'Неверный токен.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
+        user = get_object_or_404(
+            User, username=serializer.validated_data['username'])
         token = AccessToken.for_user(user)
         return Response({'token': str(token)}, status=status.HTTP_200_OK)
 
@@ -81,29 +66,7 @@ class APISignup(APIView):
     def post(self, request):
         serializer = SignUpSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        email = serializer.validated_data['email']
-        username = serializer.validated_data['username']
-
-        user, created = User.objects.get_or_create(
-            email=email,
-            username=username
-        )
-
-        token = default_token_generator.make_token(user)
-        uid = urlsafe_base64_encode(str(user.pk).encode())
-
-        email_body = (
-            f'Привет, {user.username}.\n'
-            'Для подтверждения email перейдите по ссылке: '
-            f'http://example.com/confirm/{uid}/{token}'
-        )
-        send_mail(
-            subject='Подтверждение email для доступа к API!',
-            message=email_body,
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        user = serializer.save()
 
         return Response(
             {'username': user.username, 'email': user.email},
@@ -149,7 +112,7 @@ class ReviewViewSet(viewsets.ModelViewSet):
         return self.get_title().reviews.all().order_by('id')
 
     def perform_create(self, serializer):
-        title = get_object_or_404(Title, id=self.kwargs.get('title_id'))
+        title = self.get_title()
         serializer.save(author=self.request.user, title=title)
 
 
@@ -159,16 +122,17 @@ class CommentViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthorOrReadOnly,
                           permissions.IsAuthenticatedOrReadOnly)
 
-    def get_queryset(self):
-        review = get_object_or_404(
+    def get_review(self):
+        return get_object_or_404(
             Review,
-            id=self.kwargs.get('review_id')
+            id=self.kwargs.get('review_id'),
+            title_id=self.kwargs.get('title_id')
         )
+
+    def get_queryset(self):
+        review = self.get_review()
         return review.comments.all().order_by('id')
 
     def perform_create(self, serializer):
-        review = get_object_or_404(
-            Review,
-            id=self.kwargs.get('review_id')
-        )
+        review = self.get_review()
         serializer.save(author=self.request.user, review=review)
